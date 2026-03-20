@@ -1,0 +1,58 @@
+const express = require('express');
+const fetch = require('node-fetch');
+const app = express();
+
+const API_KEY = 'YOUR_API_KEY';
+const STOP_ID = '53204';
+
+app.get('/rss', async (req, res) => {
+  const url = `https://api.translink.ca/rttiapi/v1/stops/${STOP_ID}/estimates?apikey=${API_KEY}&count=6&timeframe=60`;
+
+  const response = await fetch(url);
+  const data = await response.json();
+
+  // Collect + filter schedules
+  let schedules = data
+    .filter(route =>
+      route.RouteNo === "180" &&
+      route.Direction.includes("Lougheed")
+    )
+    .flatMap(route => route.Schedules);
+
+  // Sort by soonest departure
+  schedules.sort((a, b) => a.ExpectedCountdown - b.ExpectedCountdown);
+
+  // Take ONLY the next 2 buses
+  schedules = schedules.slice(0, 2);
+
+  const items = schedules.map(s => {
+    const time = new Date(s.ExpectedLeaveTime);
+    const minutes = s.ExpectedCountdown <= 0 ? "NOW" : `${s.ExpectedCountdown} min`;
+
+    return {
+      title: `🚌 180 → Lougheed Stn`,
+      description: `⏱ ${minutes} (${time.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})})`,
+      pubDate: time.toUTCString()
+    };
+  });
+
+  const rss = `<?xml version="1.0" encoding="UTF-8"?>
+  <rss version="2.0">
+    <channel>
+      <title>Bus 180 – Caithness → Lougheed</title>
+      <description>Next 2 departures from stop 53204</description>
+      ${items.map(item => `
+        <item>
+          <title>${item.title}</title>
+          <description>${item.description}</description>
+          <pubDate>${item.pubDate}</pubDate>
+        </item>
+      `).join('')}
+    </channel>
+  </rss>`;
+
+  res.set('Content-Type', 'application/rss+xml');
+  res.send(rss);
+});
+
+app.listen(3000, () => console.log('RSS running on port 3000'));
