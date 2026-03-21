@@ -10,7 +10,11 @@ app.get('/rss', async (req, res) => {
   try {
     const url = `https://api.translink.ca/rttiapi/v1/stops/${STOP_ID}/estimates?apikey=${API_KEY}&count=6&timeframe=60`;
 
-    const response = await fetch(url);
+    const response = await fetch(url, {
+  headers: {
+    'User-Agent': 'TranslinkRSS/1.0 jonathan.g.chow@gmail.com'
+  }
+});
     const data = await response.json();
 
     // Get all schedules for route 180 → Lougheed
