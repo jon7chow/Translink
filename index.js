@@ -1,6 +1,7 @@
 const express = require("express");
 const fetch = require("node-fetch");
 const cheerio = require("cheerio");
+const { DateTime } = require("luxon"); // timezone-aware dates
 
 const app = express();
 
@@ -19,7 +20,6 @@ app.get("/rss", async (req, res) => {
 
     const buses = [];
 
-    // Updated selector: table rows in schedule table
     $("table.schedule tbody tr").each((i, row) => {
       const tds = $(row).find("td");
       if (tds.length < 3) return;
@@ -29,37 +29,32 @@ app.get("/rss", async (req, res) => {
       const timeStr = $(tds[2]).text().trim();
 
       if (route === ROUTE_NUM && direction.includes(DESTINATION)) {
-        // Convert time string (e.g., "06:10") to a Date today
+        // Parse schedule time in Pacific Time
         const [hour, minute] = timeStr.split(":").map(Number);
-        const now = new Date();
-        const busTime = new Date(
-          now.getFullYear(),
-          now.getMonth(),
-          now.getDate(),
-          hour,
-          minute
+        const nowPT = DateTime.now().setZone("America/Vancouver");
+        let busTime = DateTime.fromObject(
+          { year: nowPT.year, month: nowPT.month, day: nowPT.day, hour, minute },
+          { zone: "America/Vancouver" }
         );
 
-        // If the bus time is earlier than now, skip (already departed)
-        if (busTime > now) {
-          const countdown = Math.round((busTime - now) / 60000); // minutes until bus
-          buses.push({ time: busTime, countdown });
-        }
+        // If the bus time is earlier than now, assume it's tomorrow
+        if (busTime < nowPT) busTime = busTime.plus({ days: 1 });
+
+        const countdown = Math.round(busTime.diff(nowPT, "minutes").minutes);
+        buses.push({ time: busTime, countdown });
       }
     });
 
-    // Sort and take next 2 buses
     buses.sort((a, b) => a.time - b.time);
     const next2 = buses.slice(0, 2);
 
-    // Generate RSS items
     let items = "";
     if (next2.length === 0) {
       items = `
         <item>
           <title>No upcoming buses</title>
           <description>🚌 No scheduled arrivals at this time</description>
-          <pubDate>${new Date().toUTCString()}</pubDate>
+          <pubDate>${DateTime.now().setZone("America/Vancouver").toUTC().toRFC() }</pubDate>
         </item>
       `;
     } else {
@@ -69,8 +64,8 @@ app.get("/rss", async (req, res) => {
           return `
             <item>
               <title>🚌 ${ROUTE_NUM} → ${DESTINATION} Stn</title>
-              <description>⏱ ${minutes} (${p.time.toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})})</description>
-              <pubDate>${p.time.toUTCString()}</pubDate>
+              <description>⏱ ${minutes} (${p.time.toFormat("HH:mm")})</description>
+              <pubDate>${p.time.toUTC().toRFC()}</pubDate>
             </item>
           `;
         })
