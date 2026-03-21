@@ -1,90 +1,80 @@
 const express = require("express");
 const fetch = require("node-fetch");
-const GtfsRealtimeBindings = require("gtfs-realtime-bindings");
+const cheerio = require("cheerio");
 
 const app = express();
 
-// Use your GTFS-RT API key from environment variables
-const API_KEY = process.env.API_KEY;
 const STOP_ID = "53204";
 const ROUTE_NUM = "180";
+const DESTINATION = "Lougheed"; // used to filter the route direction
 
 app.get("/rss", async (req, res) => {
   try {
-    const url = `https://gtfsapi.translink.ca/v3/gtfsrealtime?apikey=${API_KEY}`;
-    console.log("Fetching GTFS-RT feed from:", url);
+    const url = `https://www.translink.ca/schedules-and-maps/stop/${STOP_ID}/schedule?pageSize=5`;
+    console.log("Fetching schedule page:", url);
 
     const response = await fetch(url);
-    const buffer = await response.arrayBuffer();
-    const feed = GtfsRealtimeBindings.transit_realtime.FeedMessage.decode(
-      new Uint8Array(buffer)
-    );
+    const html = await response.text();
 
-    console.log("GTFS-RT feed entity count:", feed.entity.length);
+    const $ = cheerio.load(html);
 
-    // Collect predictions for stop 53204 & route 180
-    const predictions = [];
+    // Find the table rows that contain route 180 → Lougheed
+    const buses = [];
+    $("table.table tbody tr").each((i, row) => {
+      const route = $(row).find("td.route").text().trim();
+      const direction = $(row).find("td.direction").text().trim();
+      const time = $(row).find("td.time").text().trim();
 
-    feed.entity.forEach((entity) => {
-      if (entity.tripUpdate) {
-        const tripUpdate = entity.tripUpdate;
-        if (tripUpdate.trip.routeId === ROUTE_NUM) {
-          tripUpdate.stopTimeUpdate.forEach((stu) => {
-            if (stu.stopId === STOP_ID) {
-              const arrival = stu.arrival || stu.departure;
-              if (arrival && arrival.time) {
-                predictions.push({
-                  time: new Date(arrival.time * 1000),
-                  countdown: Math.round((arrival.time * 1000 - Date.now()) / 60000),
-                });
-              }
-            }
-          });
-        }
+      if (route === ROUTE_NUM && direction.includes(DESTINATION)) {
+        buses.push(time);
       }
     });
 
-    console.log(`Predictions for stop ${STOP_ID}, route ${ROUTE_NUM}:`, predictions);
+    // Take next 2 buses
+    const next2 = buses.slice(0, 2);
 
-    // Sort & take next 2
-    predictions.sort((a, b) => a.time - b.time);
-    const next2 = predictions.slice(0, 2);
-
-    // Handle no predictions
+    // Generate RSS items
+    let items = "";
     if (next2.length === 0) {
-      console.log("No upcoming buses found for this stop/route.");
+      items = `
+        <item>
+          <title>No upcoming buses</title>
+          <description>🚌 No scheduled arrivals at this time</description>
+          <pubDate>${new Date().toUTCString()}</pubDate>
+        </item>
+      `;
+    } else {
+      items = next2
+        .map((time) => {
+          return `
+            <item>
+              <title>🚌 ${ROUTE_NUM} → ${DESTINATION} Stn</title>
+              <description>⏱ ${time}</description>
+              <pubDate>${new Date().toUTCString()}</pubDate>
+            </item>
+          `;
+        })
+        .join("");
     }
-
-    const items = next2
-      .map((p) => {
-        const minutes = p.countdown <= 0 ? "NOW" : `${p.countdown} min`;
-        return `
-          <item>
-            <title>🚌 ${ROUTE_NUM} → Lougheed Stn</title>
-            <description>⏱ ${minutes} (${p.time.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })})</description>
-            <pubDate>${p.time.toUTCString()}</pubDate>
-          </item>
-        `;
-      })
-      .join("");
 
     const rss = `<?xml version="1.0" encoding="UTF-8"?>
       <rss version="2.0">
         <channel>
-          <title>Bus ${ROUTE_NUM} – Caithness → Lougheed</title>
+          <title>Bus ${ROUTE_NUM} – Caithness → ${DESTINATION}</title>
           <description>Next 2 departures from stop ${STOP_ID}</description>
           ${items}
         </channel>
       </rss>`;
 
     res.set("Content-Type", "application/rss+xml");
-    return res.send(rss);
+    res.send(rss);
   } catch (error) {
-    console.error("Error fetching GTFS-RT data:", error);
-    return res.status(500).send("Error fetching data. Check Render logs for details.");
+    console.error("Error fetching schedule:", error);
+    res.status(500).send("Error fetching schedule data");
   }
 });
 
+// REQUIRED for Render
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`RSS server running on port ${PORT}`);
