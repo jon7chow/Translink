@@ -1,7 +1,7 @@
 const express = require("express");
 const fetch = require("node-fetch");
 const cheerio = require("cheerio");
-const { DateTime } = require("luxon"); // timezone-aware dates
+const { DateTime } = require("luxon");
 
 const app = express();
 
@@ -20,6 +20,7 @@ app.get("/rss", async (req, res) => {
 
     const buses = [];
 
+    // Scrape table rows
     $("table.schedule tbody tr").each((i, row) => {
       const tds = $(row).find("td");
       if (tds.length < 3) return;
@@ -37,7 +38,7 @@ app.get("/rss", async (req, res) => {
           { zone: "America/Vancouver" }
         );
 
-        // If the bus time is earlier than now, assume it's tomorrow
+        // If bus already departed, skip it or roll over to next day
         if (busTime < nowPT) busTime = busTime.plus({ days: 1 });
 
         const countdown = Math.round(busTime.diff(nowPT, "minutes").minutes);
@@ -48,38 +49,29 @@ app.get("/rss", async (req, res) => {
     buses.sort((a, b) => a.time - b.time);
     const next2 = buses.slice(0, 2);
 
-    let items = "";
+    // Compact single-line display for DAKboard
+    let displayLine = "";
     if (next2.length === 0) {
-      items = `
-        <item>
-          <title>No upcoming buses</title>
-          <description>🚌 No scheduled arrivals at this time</description>
-          <pubDate>${DateTime.now().setZone("America/Vancouver").toUTC().toRFC() }</pubDate>
-        </item>
-      `;
+      displayLine = "🚌 No upcoming buses";
     } else {
-      items = next2
-        .map((p) => {
-          const minutes = p.countdown <= 0 ? "NOW" : `${p.countdown} min`;
-          return `
-            <item>
-              <title>🚌 ${ROUTE_NUM} → ${DESTINATION} Stn</title>
-              <description>⏱ ${minutes} (${p.time.toFormat("HH:mm")})</description>
-              <pubDate>${p.time.toUTC().toRFC()}</pubDate>
-            </item>
-          `;
-        })
-        .join("");
+      displayLine =
+        `🚌 ${ROUTE_NUM} → ${DESTINATION}: ` +
+        next2.map((p) => (p.countdown <= 0 ? "NOW" : `${p.countdown} min`)).join(" | ");
     }
 
+    // Single RSS item
     const rss = `<?xml version="1.0" encoding="UTF-8"?>
-      <rss version="2.0">
-        <channel>
-          <title>Bus ${ROUTE_NUM} – Caithness → ${DESTINATION}</title>
-          <description>Next 2 departures from stop ${STOP_ID}</description>
-          ${items}
-        </channel>
-      </rss>`;
+<rss version="2.0">
+  <channel>
+    <title>Bus ${ROUTE_NUM} – Caithness → ${DESTINATION}</title>
+    <description>Next 2 departures from stop ${STOP_ID}</description>
+    <item>
+      <title>${displayLine}</title>
+      <description>${displayLine}</description>
+      <pubDate>${DateTime.now().setZone("America/Vancouver").toUTC().toRFC2822()}</pubDate>
+    </item>
+  </channel>
+</rss>`;
 
     res.set("Content-Type", "application/rss+xml");
     res.send(rss);
@@ -89,6 +81,7 @@ app.get("/rss", async (req, res) => {
   }
 });
 
+// REQUIRED for Render
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`RSS server running on port ${PORT}`);
