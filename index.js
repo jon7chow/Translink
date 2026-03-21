@@ -3,22 +3,32 @@ const fetch = require('node-fetch');
 
 const app = express();
 
-const API_KEY = '2oIEwpizAB7ssiANdujO'; // replace with your actual key
+const API_KEY = '2oIEwpizAB7ssiANdujO'; // Replace with your actual TransLink RTTI API key
 const STOP_ID = '53204';
 
 app.get('/rss', async (req, res) => {
   try {
     const url = `https://api.translink.ca/rttiapi/v1/stops/${STOP_ID}/estimates.json?apikey=${API_KEY}&count=6&timeframe=60`;
 
+    // Fetch from TransLink with proper User-Agent
     const response = await fetch(url, {
       headers: {
         'User-Agent': 'TranslinkRSS/1.0 jonathan.g.chow@gmail.com'
       }
     });
 
-    const data = await response.json();
+    const rawText = await response.text();
+    console.log("RAW RESPONSE:", rawText); // <-- logs raw API response
 
-    // Get all schedules for route 180 → Lougheed
+    let data;
+    try {
+      data = JSON.parse(rawText); // Try parsing JSON
+    } catch (err) {
+      console.error("Failed to parse JSON. Likely invalid API key or HTML response.");
+      return res.status(500).send('Error fetching data (invalid API key or API returned HTML)');
+    }
+
+    // Filter for route 180 → Lougheed
     let schedules = data
       .filter(route =>
         route.RouteNo === "180" &&
@@ -26,16 +36,15 @@ app.get('/rss', async (req, res) => {
       )
       .flatMap(route => route.Schedules);
 
-    // Sort by soonest bus
+    // Sort by soonest
     schedules.sort((a, b) => a.ExpectedCountdown - b.ExpectedCountdown);
 
-    // Take next 2 buses only
+    // Take next 2 buses
     schedules = schedules.slice(0, 2);
 
     const items = schedules.map(s => {
       const time = new Date(s.ExpectedLeaveTime);
       const minutes = s.ExpectedCountdown <= 0 ? "NOW" : `${s.ExpectedCountdown} min`;
-
       return `
         <item>
           <title>🚌 180 → Lougheed Stn</title>
@@ -59,9 +68,9 @@ app.get('/rss', async (req, res) => {
 
   } catch (err) {
     console.error(err);
-    res.status(500).send('Error fetching data');
+    res.status(500).send('Error fetching data (unexpected error)');
   }
-}); // <- closes app.get
+});
 
 // REQUIRED for Render
 const PORT = process.env.PORT || 3000;
