@@ -4,13 +4,15 @@ const GtfsRealtimeBindings = require("gtfs-realtime-bindings");
 
 const app = express();
 
-const API_KEY = process.env.API_KEY; // your TransLink GTFS-RT key
+// Use your GTFS-RT API key from environment variables
+const API_KEY = process.env.API_KEY;
 const STOP_ID = "53204";
 const ROUTE_NUM = "180";
 
 app.get("/rss", async (req, res) => {
   try {
     const url = `https://gtfsapi.translink.ca/v3/gtfsrealtime?apikey=${API_KEY}`;
+    console.log("Fetching GTFS-RT feed from:", url);
 
     const response = await fetch(url);
     const buffer = await response.arrayBuffer();
@@ -18,14 +20,14 @@ app.get("/rss", async (req, res) => {
       new Uint8Array(buffer)
     );
 
+    console.log("GTFS-RT feed entity count:", feed.entity.length);
+
     // Collect predictions for stop 53204 & route 180
     const predictions = [];
 
     feed.entity.forEach((entity) => {
       if (entity.tripUpdate) {
         const tripUpdate = entity.tripUpdate;
-
-        // Check if route_id matches
         if (tripUpdate.trip.routeId === ROUTE_NUM) {
           tripUpdate.stopTimeUpdate.forEach((stu) => {
             if (stu.stopId === STOP_ID) {
@@ -33,9 +35,7 @@ app.get("/rss", async (req, res) => {
               if (arrival && arrival.time) {
                 predictions.push({
                   time: new Date(arrival.time * 1000),
-                  countdown: Math.round(
-                    (arrival.time * 1000 - Date.now()) / 60000
-                  ),
+                  countdown: Math.round((arrival.time * 1000 - Date.now()) / 60000),
                 });
               }
             }
@@ -44,9 +44,16 @@ app.get("/rss", async (req, res) => {
       }
     });
 
+    console.log(`Predictions for stop ${STOP_ID}, route ${ROUTE_NUM}:`, predictions);
+
     // Sort & take next 2
     predictions.sort((a, b) => a.time - b.time);
     const next2 = predictions.slice(0, 2);
+
+    // Handle no predictions
+    if (next2.length === 0) {
+      console.log("No upcoming buses found for this stop/route.");
+    }
 
     const items = next2
       .map((p) => {
@@ -54,10 +61,7 @@ app.get("/rss", async (req, res) => {
         return `
           <item>
             <title>🚌 ${ROUTE_NUM} → Lougheed Stn</title>
-            <description>⏱ ${minutes} (${p.time.toLocaleTimeString([], {
-              hour: "2-digit",
-              minute: "2-digit",
-            })})</description>
+            <description>⏱ ${minutes} (${p.time.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })})</description>
             <pubDate>${p.time.toUTCString()}</pubDate>
           </item>
         `;
@@ -76,8 +80,8 @@ app.get("/rss", async (req, res) => {
     res.set("Content-Type", "application/rss+xml");
     return res.send(rss);
   } catch (error) {
-    console.error(error);
-    return res.status(500).send("Error fetching data");
+    console.error("Error fetching GTFS-RT data:", error);
+    return res.status(500).send("Error fetching data. Check Render logs for details.");
   }
 });
 
