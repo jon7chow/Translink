@@ -3,20 +3,19 @@ const fetch = require('node-fetch');
 
 const app = express();
 
-const API_KEY = '2oIEwpizAB7ssiANdujO'; // <-- put your TransLink API key here
+const API_KEY = '2oIEwpizAB7ssiANdujO'; // replace with your actual key
 const STOP_ID = '53204';
 
 app.get('/rss', async (req, res) => {
   try {
-    const url = `https://api.translink.ca/rttiapi/v1/stops/${STOP_ID}/estimates?apikey=${API_KEY}&count=6&timeframe=60`;
+    const url = `https://api.translink.ca/rttiapi/v1/stops/${STOP_ID}/estimates.json?apikey=${API_KEY}&count=6&timeframe=60`;
 
- const response = await fetch(url, {
-  headers: {
-    'User-Agent': 'TranslinkRSS/1.0 jonathan.g.chow@gmail.com',
-    'Accept': 'application/json'
-  }
-});
-});
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'TranslinkRSS/1.0 jonathan.g.chow@gmail.com'
+      }
+    });
+
     const data = await response.json();
 
     // Get all schedules for route 180 → Lougheed
@@ -62,7 +61,7 @@ app.get('/rss', async (req, res) => {
     console.error(err);
     res.status(500).send('Error fetching data');
   }
-});
+}); // <- closes app.get
 
 // REQUIRED for Render
 const PORT = process.env.PORT || 3000;
