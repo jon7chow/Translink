@@ -1,88 +1,120 @@
 const express = require("express");
 const fetch = require("node-fetch");
-const cheerio = require("cheerio");
+const pdfParse = require("pdf-parse");
 const { DateTime } = require("luxon");
 
 const app = express();
 
-const STOP_ID = "53204";
-const ROUTE_NUM = "180";
-const DESTINATION = "Lougheed";
+const PDF_URL = "https://infomaps.translink.ca/Public_Timetables/213/tt180.pdf";
 
 app.get("/rss", async (req, res) => {
   try {
-    const url = `https://www.translink.ca/schedules-and-maps/stop/${STOP_ID}/schedule?pageSize=5`;
-    console.log("Fetching schedule page:", url);
+    console.log("Fetching PDF...");
 
-    const response = await fetch(url);
-    const html = await response.text();
-    const $ = cheerio.load(html);
+    const response = await fetch(PDF_URL);
+    const buffer = await response.arrayBuffer();
 
-    const buses = [];
+    const pdfData = await pdfParse(buffer);
+    const text = pdfData.text;
 
-    // Scrape table rows
-    $("table.schedule tbody tr").each((i, row) => {
-      const tds = $(row).find("td");
-      if (tds.length < 3) return;
+    const now = DateTime.now().setZone("America/Vancouver");
 
-      const route = $(tds[0]).text().trim();
-      const direction = $(tds[1]).text().trim();
-      const timeStr = $(tds[2]).text().trim();
+    // Determine which schedule to use
+    let section;
+    if (now.weekday <= 5) section = "MONDAY TO FRIDAY";
+    else if (now.weekday === 6) section = "SATURDAY";
+    else section = "SUNDAY";
 
-      if (route === ROUTE_NUM && direction.includes(DESTINATION)) {
-        // Parse schedule time in Pacific Time
-        const [hour, minute] = timeStr.split(":").map(Number);
-        const nowPT = DateTime.now().setZone("America/Vancouver");
-        let busTime = DateTime.fromObject(
-          { year: nowPT.year, month: nowPT.month, day: nowPT.day, hour, minute },
-          { zone: "America/Vancouver" }
-        );
+    console.log("Using section:", section);
 
-        // If bus already departed, skip it or roll over to next day
-        if (busTime < nowPT) busTime = busTime.plus({ days: 1 });
+    // Extract relevant section of text
+    const sectionStart = text.indexOf(section);
+    const nextSectionIndex = text.indexOf("SUNDAY", sectionStart + 10);
 
-        const countdown = Math.round(busTime.diff(nowPT, "minutes").minutes);
-        buses.push({ time: busTime, countdown });
-      }
+    const sectionText =
+      nextSectionIndex > sectionStart
+        ? text.substring(sectionStart, nextSectionIndex)
+        : text.substring(sectionStart);
+
+    // Split lines
+    const lines = sectionText.split("\n").map((l) => l.trim()).filter(Boolean);
+
+    const times = [];
+
+    lines.forEach((line) => {
+      // Split by spaces (PDF columns)
+      const parts = line.split(/\s+/);
+
+      // We want columns 4, 7, 10 (index 3,6,9)
+      [3, 6, 9].forEach((idx) => {
+        if (parts[idx]) {
+          let t = parts[idx].replace(".", ":");
+
+          // Validate time
+          if (/^\d{1,2}:\d{2}$/.test(t)) {
+            const [hour, minute] = t.split(":").map(Number);
+
+            let busTime = DateTime.fromObject(
+              {
+                year: now.year,
+                month: now.month,
+                day: now.day,
+                hour,
+                minute,
+              },
+              { zone: "America/Vancouver" }
+            );
+
+            // If already passed, skip
+            if (busTime > now) {
+              times.push(busTime);
+            }
+          }
+        }
+      });
     });
 
-    buses.sort((a, b) => a.time - b.time);
-    const next2 = buses.slice(0, 2);
+    // Sort and take next 2
+    times.sort((a, b) => a - b);
+    const next2 = times.slice(0, 2);
 
-    // Compact single-line display for DAKboard
-    let displayLine = "";
+    let display;
+
     if (next2.length === 0) {
-      displayLine = "🚌 No upcoming buses";
+      display = "🚌 No upcoming buses";
     } else {
-      displayLine =
-        `🚌 ${ROUTE_NUM} → ${DESTINATION}: ` +
-        next2.map((p) => (p.countdown <= 0 ? "NOW" : `${p.countdown} min`)).join(" | ");
+      display =
+        "🚌 180 → Lougheed: " +
+        next2
+          .map((t) => {
+            const diff = Math.round(t.diff(now, "minutes").minutes);
+            return diff <= 0 ? "NOW" : `${diff} min`;
+          })
+          .join(" | ");
     }
 
-    // Single RSS item
     const rss = `<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0">
   <channel>
-    <title>Bus ${ROUTE_NUM} – Caithness → ${DESTINATION}</title>
-    <description>Next 2 departures from stop ${STOP_ID}</description>
+    <title>Bus 180 – Burquitlam → Lougheed</title>
+    <description>Next buses from timetable PDF</description>
     <item>
-      <title>${displayLine}</title>
-      <description>${displayLine}</description>
-      <pubDate>${DateTime.now().setZone("America/Vancouver").toUTC().toRFC2822()}</pubDate>
+      <title>${display}</title>
+      <description>${display}</description>
+      <pubDate>${now.toUTC().toRFC2822()}</pubDate>
     </item>
   </channel>
 </rss>`;
 
     res.set("Content-Type", "application/rss+xml");
     res.send(rss);
-  } catch (error) {
-    console.error("Error fetching schedule:", error);
-    res.status(500).send("Error fetching schedule data");
+  } catch (err) {
+    console.error("Error:", err);
+    res.status(500).send("Error generating RSS");
   }
 });
 
-// REQUIRED for Render
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`RSS server running on port ${PORT}`);
+  console.log(`Server running on port ${PORT}`);
 });
