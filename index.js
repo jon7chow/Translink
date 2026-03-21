@@ -6,7 +6,7 @@ const app = express();
 
 const STOP_ID = "53204";
 const ROUTE_NUM = "180";
-const DESTINATION = "Lougheed"; // used to filter the route direction
+const DESTINATION = "Lougheed";
 
 app.get("/rss", async (req, res) => {
   try {
@@ -15,22 +15,41 @@ app.get("/rss", async (req, res) => {
 
     const response = await fetch(url);
     const html = await response.text();
-
     const $ = cheerio.load(html);
 
-    // Find the table rows that contain route 180 → Lougheed
     const buses = [];
-    $("table.table tbody tr").each((i, row) => {
-      const route = $(row).find("td.route").text().trim();
-      const direction = $(row).find("td.direction").text().trim();
-      const time = $(row).find("td.time").text().trim();
+
+    // Updated selector: table rows in schedule table
+    $("table.schedule tbody tr").each((i, row) => {
+      const tds = $(row).find("td");
+      if (tds.length < 3) return;
+
+      const route = $(tds[0]).text().trim();
+      const direction = $(tds[1]).text().trim();
+      const timeStr = $(tds[2]).text().trim();
 
       if (route === ROUTE_NUM && direction.includes(DESTINATION)) {
-        buses.push(time);
+        // Convert time string (e.g., "06:10") to a Date today
+        const [hour, minute] = timeStr.split(":").map(Number);
+        const now = new Date();
+        const busTime = new Date(
+          now.getFullYear(),
+          now.getMonth(),
+          now.getDate(),
+          hour,
+          minute
+        );
+
+        // If the bus time is earlier than now, skip (already departed)
+        if (busTime > now) {
+          const countdown = Math.round((busTime - now) / 60000); // minutes until bus
+          buses.push({ time: busTime, countdown });
+        }
       }
     });
 
-    // Take next 2 buses
+    // Sort and take next 2 buses
+    buses.sort((a, b) => a.time - b.time);
     const next2 = buses.slice(0, 2);
 
     // Generate RSS items
@@ -45,12 +64,13 @@ app.get("/rss", async (req, res) => {
       `;
     } else {
       items = next2
-        .map((time) => {
+        .map((p) => {
+          const minutes = p.countdown <= 0 ? "NOW" : `${p.countdown} min`;
           return `
             <item>
               <title>🚌 ${ROUTE_NUM} → ${DESTINATION} Stn</title>
-              <description>⏱ ${time}</description>
-              <pubDate>${new Date().toUTCString()}</pubDate>
+              <description>⏱ ${minutes} (${p.time.toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})})</description>
+              <pubDate>${p.time.toUTCString()}</pubDate>
             </item>
           `;
         })
@@ -74,7 +94,6 @@ app.get("/rss", async (req, res) => {
   }
 });
 
-// REQUIRED for Render
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`RSS server running on port ${PORT}`);
