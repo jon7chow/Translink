@@ -3,7 +3,7 @@ const fetch = require('node-fetch');
 
 const app = express();
 
-const API_KEY = 2oIEwpizAB7ssiANdujO; // <-- put your TransLink API key here
+const API_KEY = '2oIEwpizAB7ssiANdujO'; // <-- put your TransLink API key here
 const STOP_ID = '53204';
 
 app.get('/rss', async (req, res) => {
