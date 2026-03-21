@@ -96,7 +96,7 @@ app.get("/rss", (req, res) => {
       display = "🚌 No upcoming buses";
     } else {
       display =
-        "🚌 180 → Lougheed: " +
+        "🚌 180 → Caithness to Burquitlam " +
         upcoming
           .map((t) => {
             const mins = Math.round(t.diff(now, "minutes").minutes);
@@ -113,7 +113,7 @@ app.get("/rss", (req, res) => {
     <description>Next scheduled buses</description>
     <item>
       <title>${display}</title>
-      <description>${display}</description>
+      <description> </description>
       <pubDate>${now.toUTC().toRFC2822()}</pubDate>
     </item>
   </channel>
