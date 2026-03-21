@@ -1,7 +1,7 @@
 {
   "name": "translink-rss",
   "version": "1.0.0",
-  "description": "RSS feed for TransLink bus 180 Caithness → Lougheed",
+  "description": "RSS feed for TransLink bus 180 Caithness → Lougheed (HTML schedule scraping)",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
@@ -9,6 +9,6 @@
   "dependencies": {
     "express": "^4.18.2",
     "node-fetch": "^2.6.7",
-    "gtfs-realtime-bindings": "1.1.1"
+    "cheerio": "^1.0.0-rc.12"
   }
 }
